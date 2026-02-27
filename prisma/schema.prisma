@@ -1,0 +1,238 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+// ===========================================
+// Auth.js Models
+// ===========================================
+
+model User {
+  id                   String    @id @default(cuid())
+  name                 String?
+  email                String    @unique
+  emailVerified        DateTime?
+  image                String?
+  githubUsername        String?   @unique @map("github_username")
+  encryptedGithubToken String?   @map("encrypted_github_token") @db.Text
+  role                 UserRole  @default(USER)
+  plan                 Plan      @default(FREE)
+
+  accounts      Account[]
+  sessions      Session[]
+  Authenticator Authenticator[]
+
+  // SubForge relations
+  projects Project[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+}
+
+// ===========================================
+// SubForge Models
+// ===========================================
+
+model Project {
+  id              String        @id @default(cuid())
+  userId          String        @map("user_id")
+  name            String // e.g., "Portfolio App"
+  subdomain       String        @unique // e.g., "portfolio" -> portfolio.postomation.com
+  repoUrl         String        @map("repo_url") // GitHub repo URL
+  branch          String        @default("main") // Git branch to deploy
+  installCommand  String?       @map("install_command") // Override: e.g., "pnpm install"
+  buildCommand    String?       @map("build_command") // Override: e.g., "pnpm build"
+  startCommand    String?       @map("start_command") // Override: e.g., "next start"
+  nodeVersion     String        @default("20") @map("node_version")
+  port            Int // Local port for the app (e.g., 3001)
+  rootDirectory   String?       @map("root_directory") // For monorepos
+  status          ProjectStatus @default(PENDING)
+  lastCommitHash  String?       @map("last_commit_hash")
+  nginxConfigPath String?       @map("nginx_config_path")
+  pm2Id           String?       @map("pm2_id") // PM2 process name/id
+  appType         String?       @map("app_type") // e.g., "Next.js", "Astro", "Remix"
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  envVars        EnvironmentVar[]
+  deployments    Deployment[]
+  databases      Database[]
+  storageBuckets StorageBucket[]
+
+  @@map("projects")
+}
+
+model EnvironmentVar {
+  id             String   @id @default(cuid())
+  projectId      String   @map("project_id")
+  key            String
+  encryptedValue String   @map("encrypted_value") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])
+  @@map("environment_vars")
+}
+
+model Deployment {
+  id                String           @id @default(cuid())
+  projectId         String           @map("project_id")
+  commitHash        String           @map("commit_hash")
+  commitMsg         String?          @map("commit_msg")
+  status            DeploymentStatus @default(BUILDING)
+  logs              String?          @db.Text
+  errorMsg          String?          @map("error_msg") @db.Text
+  lastCompletedStep String?          @map("last_completed_step")
+  startedAt         DateTime         @default(now()) @map("started_at")
+  finishedAt        DateTime?        @map("finished_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, startedAt])
+  @@map("deployments")
+}
+
+model Database {
+  id                String   @id @default(cuid())
+  projectId         String   @map("project_id")
+  name              String // Database name
+  type              DbType   @default(POSTGRES)
+  username          String
+  encryptedPassword String   @map("encrypted_password") @db.Text
+  connectionString  String   @map("connection_string") // Full DATABASE_URL
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, name])
+  @@map("databases")
+}
+
+model StorageBucket {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  name      String // Bucket name (e.g., "uploads")
+  path      String // File system path on VPS
+  publicUrl String   @map("public_url") // Public access URL
+  sizeBytes BigInt   @default(0) @map("size_bytes")
+  fileCount Int      @default(0) @map("file_count")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  files   StorageFile[]
+
+  @@unique([projectId, name])
+  @@map("storage_buckets")
+}
+
+model StorageFile {
+  id         String   @id @default(cuid())
+  bucketId   String   @map("bucket_id")
+  filename   String
+  path       String // Relative path in bucket
+  mimeType   String   @map("mime_type")
+  sizeBytes  BigInt   @map("size_bytes")
+  publicUrl  String   @map("public_url")
+  uploadedAt DateTime @default(now()) @map("uploaded_at")
+
+  bucket StorageBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+
+  @@unique([bucketId, path])
+  @@map("storage_files")
+}
+
+// ===========================================
+// Enums
+// ===========================================
+
+enum ProjectStatus {
+  PENDING // Initial creation
+  BUILDING // Running build
+  ACTIVE // Successfully deployed
+  FAILED // Deployment failed
+  STOPPED // Manually stopped
+}
+
+enum DeploymentStatus {
+  BUILDING
+  SUCCESS
+  FAILED
+}
+
+enum DbType {
+  POSTGRES
+  MYSQL
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum Plan {
+  FREE
+  PRO
+}
