@@ -145,9 +145,15 @@ export default function NewProjectPage() {
   const [bulkEnvInput, setBulkEnvInput] = useState("");
   const [showBulkInput, setShowBulkInput] = useState(false);
   const [checkingSubdomain, setCheckingSubdomain] = useState(false);
-  const [subdomainAvailable, setSubdomainAvailable] = useState<boolean | null>(null);
-  const [suggestedSubdomain, setSuggestedSubdomain] = useState<string | null>(null);
-  const checkSubdomainTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [subdomainAvailable, setSubdomainAvailable] = useState<boolean | null>(
+    null,
+  );
+  const [suggestedSubdomain, setSuggestedSubdomain] = useState<string | null>(
+    null,
+  );
+  const checkSubdomainTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const domain = process.env.NEXT_PUBLIC_APP_DOMAIN as string;
 
@@ -155,42 +161,39 @@ export default function NewProjectPage() {
   const fullDomain = subdomain ? `${subdomain}.${domain}` : "";
 
   // Check subdomain availability against the database
-  const checkSubdomainAvailability = useCallback(
-    (value: string) => {
-      if (checkSubdomainTimer.current) {
-        clearTimeout(checkSubdomainTimer.current);
-      }
+  const checkSubdomainAvailability = useCallback((value: string) => {
+    if (checkSubdomainTimer.current) {
+      clearTimeout(checkSubdomainTimer.current);
+    }
 
-      const error = validateSubdomain(value);
-      if (error || !value) {
-        setSubdomainAvailable(null);
-        setSuggestedSubdomain(null);
-        setCheckingSubdomain(false);
-        return;
-      }
-
-      setCheckingSubdomain(true);
+    const error = validateSubdomain(value);
+    if (error || !value) {
       setSubdomainAvailable(null);
       setSuggestedSubdomain(null);
+      setCheckingSubdomain(false);
+      return;
+    }
 
-      checkSubdomainTimer.current = setTimeout(async () => {
-        try {
-          const res = await fetch(
-            `/api/projects/check-subdomain?subdomain=${encodeURIComponent(value)}`,
-          );
-          if (!res.ok) return;
-          const data = await res.json();
-          setSubdomainAvailable(data.available);
-          setSuggestedSubdomain(data.suggestion ?? null);
-        } catch {
-          // Silently fail — user will still get server-side validation on submit
-        } finally {
-          setCheckingSubdomain(false);
-        }
-      }, 500);
-    },
-    [],
-  );
+    setCheckingSubdomain(true);
+    setSubdomainAvailable(null);
+    setSuggestedSubdomain(null);
+
+    checkSubdomainTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/projects/check-subdomain?subdomain=${encodeURIComponent(value)}`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        setSubdomainAvailable(data.available);
+        setSuggestedSubdomain(data.suggestion ?? null);
+      } catch {
+        // Silently fail — user will still get server-side validation on submit
+      } finally {
+        setCheckingSubdomain(false);
+      }
+    }, 500);
+  }, []);
 
   // SECURITY: Validate on change
   const handleSubdomainChange = (value: string) => {
@@ -244,14 +247,7 @@ export default function NewProjectPage() {
       // Ignore localStorage errors (quota, etc.)
       console.warn("Failed to save draft:", e);
     }
-  }, [
-    selectedRepoId,
-    name,
-    subdomain,
-    branch,
-    rootDirectory,
-    envVars,
-  ]);
+  }, [selectedRepoId, name, subdomain, branch, rootDirectory, envVars]);
 
   // Clear saved form state
   const clearFormState = useCallback(() => {
@@ -743,10 +739,13 @@ export default function NewProjectPage() {
                           id="subdomain"
                           placeholder="portfolio"
                           value={subdomain}
-                          onChange={(e) => handleSubdomainChange(e.target.value)}
+                          onChange={(e) =>
+                            handleSubdomainChange(e.target.value)
+                          }
                           required
                           className={
-                            validationErrors.subdomain || subdomainAvailable === false
+                            validationErrors.subdomain ||
+                            subdomainAvailable === false
                               ? "border-destructive pr-9"
                               : subdomainAvailable === true
                                 ? "border-green-500 pr-9"
@@ -757,12 +756,16 @@ export default function NewProjectPage() {
                         {checkingSubdomain && (
                           <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
                         )}
-                        {!checkingSubdomain && subdomainAvailable === true && !validationErrors.subdomain && (
-                          <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-500" />
-                        )}
-                        {!checkingSubdomain && subdomainAvailable === false && !validationErrors.subdomain && (
-                          <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-destructive" />
-                        )}
+                        {!checkingSubdomain &&
+                          subdomainAvailable === true &&
+                          !validationErrors.subdomain && (
+                            <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-500" />
+                          )}
+                        {!checkingSubdomain &&
+                          subdomainAvailable === false &&
+                          !validationErrors.subdomain && (
+                            <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-destructive" />
+                          )}
                       </div>
                       <span className="text-muted-foreground text-sm whitespace-nowrap">
                         .{domain}
