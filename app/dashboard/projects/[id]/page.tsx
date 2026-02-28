@@ -219,6 +219,7 @@ export default function ProjectDetailPage({
         const data = await res.json();
         setDeploymentSteps(data.steps);
         setDeploymentTextLog(data.textLog);
+        autoExpandFailedSteps(data.steps);
       }
     } catch {
       // Ignore
@@ -234,6 +235,21 @@ export default function ProjectDetailPage({
       else next.add(stepId);
       return next;
     });
+  };
+
+  // Automatically expand any failed step that has output/error so users see
+  // the details without needing to know to click it.
+  const autoExpandFailedSteps = (steps: DeploymentStep[]) => {
+    const toExpand = steps
+      .filter((s) => s.status === "failed" && (s.output || s.error))
+      .map((s) => s.id);
+    if (toExpand.length > 0) {
+      setExpandedSteps((prev) => {
+        const next = new Set(prev);
+        toExpand.forEach((id) => next.add(id));
+        return next;
+      });
+    }
   };
 
   const getLastFailedStep = (): { stepId: string; stepName: string } | null => {
@@ -292,6 +308,7 @@ export default function ProjectDetailPage({
           setDeploymentSteps(steps);
           setDeploymentTextLog(textLog);
           setSelectedDeployment("live");
+          autoExpandFailedSteps(steps);
         },
       );
 

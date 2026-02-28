@@ -34,8 +34,8 @@ const ERROR_PATTERNS: [RegExp, string][] = [
   [/\.env file missing/i, "Environment file could not be created. Please try again."],
 
   // PM2 errors
-  [/Application failed to start/i, "The application failed to start. Check your start command and logs."],
-  [/Port \d+ not bound/i, "The application started but isn't responding. Check your app's PORT configuration."],
+  [/Application failed to start/i, "The application crashed on startup. Click the failed step in the logs to see the crash output."],
+  [/Port \d+ not bound/i, "The application started but isn't listening on the expected port. Make sure your app reads the PORT environment variable. Click the failed step for details."],
   [/PM2 stop failed/i, "Failed to stop the application. It may have already been stopped."],
   [/PM2 restart failed/i, "Failed to restart the application. Try stopping and redeploying."],
   [/PM2 process .+ still running/i, "Could not fully stop the application. Please try again."],
