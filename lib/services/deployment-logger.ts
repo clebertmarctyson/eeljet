@@ -76,6 +76,9 @@ export class DeploymentLogger {
       step.error = error;
       step.output = output ? output.substring(0, 5000) : undefined;
       this.appendText(`FAILED: ${step.name} - ${error}`);
+      if (output) {
+        this.appendText(output.substring(0, 5000));
+      }
       this.notify();
     }
   }
