@@ -429,6 +429,18 @@ export async function createProject(
       throw new Error(`Failed to write ecosystem.config.js: ${ecoWriteResult.stderr}`);
     }
 
+    // Write app-type server script if needed (e.g. Vite static server)
+    const serverScript = appType.getServerScript?.();
+    if (serverScript) {
+      const scriptWriteResult = await sshExec(
+        vps.ssh,
+        `cat > "${workDir}/_eeljet_server.js" << 'EELJET_SRV_EOF'\n${serverScript}\nEELJET_SRV_EOF`,
+      );
+      if (scriptWriteResult.code !== 0) {
+        throw new Error(`Failed to write server script: ${scriptWriteResult.stderr}`);
+      }
+    }
+
     // STEP 10: Start PM2
     logger.startStep(pm2Step);
     await sshExec(
@@ -905,6 +917,19 @@ export async function deployProject(
           if (ecoWriteRes.code !== 0) {
             throw new Error(`Failed to write ecosystem.config.js: ${ecoWriteRes.stderr}`);
           }
+
+          // Write app-type server script if needed (e.g. Vite static server)
+          const serverScript = appType.getServerScript?.();
+          if (serverScript) {
+            const srvWriteRes = await sshExec(
+              vps.ssh,
+              `cat > "${workDir}/_eeljet_server.js" << 'EELJET_SRV_EOF'\n${serverScript}\nEELJET_SRV_EOF`,
+            );
+            if (srvWriteRes.code !== 0) {
+              throw new Error(`Failed to write server script: ${srvWriteRes.stderr}`);
+            }
+          }
+
           const restartResult = await sshExec(
             vps.ssh,
             `bash -c '${sourceNvm} && pm2 restart ${project.pm2Id} && pm2 save'`,
