@@ -62,18 +62,10 @@ async function readMapFile(vps: VPSConfig): Promise<string> {
 }
 
 /**
- * Write content to the port mapping file via temp file + mv.
- * Tries direct mv first (works if deploy user owns the file).
- * Falls back to sudo mv (requires NOPASSWD in sudoers for mv).
- *
- * VPS one-time setup to avoid sudo for mv:
+ * Write content to the port mapping file via temp file + cp.
+ * Uses cp (not mv) so only file write permission is needed — not directory
+ * write permission. Requires the deploy user to own the port mapping file:
  *   sudo chown $VPS_USER:$VPS_USER /etc/nginx/subdomain-ports.map
- *   sudo chmod 644 /etc/nginx/subdomain-ports.map
- *
- * Or, if you prefer NOPASSWD instead:
- *   echo "$VPS_USER ALL=(ALL) NOPASSWD: /bin/mv /tmp/eeljet-portmap.tmp /etc/nginx/subdomain-ports.map" \
- *     | sudo tee /etc/sudoers.d/eeljet-mv > /dev/null
- *   sudo chmod 440 /etc/sudoers.d/eeljet-mv
  */
 async function writeMapFile(vps: VPSConfig, content: string): Promise<void> {
   const tmpFile = "/tmp/eeljet-portmap.tmp";
@@ -85,21 +77,18 @@ async function writeMapFile(vps: VPSConfig, content: string): Promise<void> {
     throw new Error(`Failed to write temp map file: ${writeResult.stderr}`);
   }
 
-  // Try direct mv first — works if deploy user owns the port mapping file.
-  const directMv = await sshExec(
+  // Use cp to overwrite the destination file in-place.
+  // cp only needs write permission on the destination FILE (not the directory),
+  // unlike mv which needs write permission on the destination DIRECTORY.
+  // This works as long as the deploy user owns /etc/nginx/subdomain-ports.map.
+  const cpResult = await sshExec(
     vps.ssh,
-    `mv "${tmpFile}" "${vps.portMappingFile}" 2>/dev/null`,
+    `cp "${tmpFile}" "${vps.portMappingFile}" && rm -f "${tmpFile}"`,
   );
-  if (directMv.code === 0) return;
-
-  // Fall back to sudo mv (requires NOPASSWD in /etc/sudoers.d/eeljet-mv).
-  const mvResult = await sshExec(
-    vps.ssh,
-    `sudo mv "${tmpFile}" "${vps.portMappingFile}"`,
-  );
-  if (mvResult.code !== 0) {
+  if (cpResult.code !== 0) {
+    await sshExec(vps.ssh, `rm -f "${tmpFile}"`);
     throw new Error(
-      `Failed to move map file: ${mvResult.stderr}\n` +
+      `Failed to write map file: ${cpResult.stderr}\n` +
         `Fix on VPS: sudo chown ${vps.deployUser}:${vps.deployUser} ${vps.portMappingFile}`,
     );
   }
