@@ -454,7 +454,7 @@ export async function createProject(
     } catch (pm2Err) {
       const logsResult = await sshExec(
         vps.ssh,
-        `bash -c '${SOURCE_NVM} && pm2 logs ${pm2Id} --lines 50 --nostream 2>&1 || true'`,
+        `bash -c '${SOURCE_NVM} && (tail -n 100 ~/.pm2/logs/${pm2Id}-error.log 2>/dev/null; tail -n 100 ~/.pm2/logs/${pm2Id}-out.log 2>/dev/null) || true'`,
       );
       const errMsg = pm2Err instanceof Error ? pm2Err.message : "Application failed to start";
       logger.failStep(pm2Step, errMsg, logsResult.stdout.trim() || undefined);
@@ -946,7 +946,7 @@ export async function deployProject(
           } catch (pm2Err) {
             const logsResult = await sshExec(
               vps.ssh,
-              `bash -c '${sourceNvm} && pm2 logs ${project.pm2Id} --lines 50 --nostream 2>&1 || true'`,
+              `bash -c '${sourceNvm} && (tail -n 100 ~/.pm2/logs/${project.pm2Id}-error.log 2>/dev/null; tail -n 100 ~/.pm2/logs/${project.pm2Id}-out.log 2>/dev/null) || true'`,
             );
             const errMsg = pm2Err instanceof Error ? pm2Err.message : "Application failed to start";
             logger.failStep(stepId, errMsg, logsResult.stdout.trim() || undefined);
