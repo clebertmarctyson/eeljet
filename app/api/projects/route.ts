@@ -48,7 +48,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const {
-      name,
       subdomain,
       repoUrl,
       branch,
@@ -60,13 +59,6 @@ export async function POST(request: NextRequest) {
       buildCommand,
       startCommand,
     } = body;
-
-    if (!name || typeof name !== "string") {
-      return NextResponse.json(
-        { error: "name is required and must be a string" },
-        { status: 400 }
-      );
-    }
 
     if (!subdomain || typeof subdomain !== "string") {
       return NextResponse.json(
@@ -122,7 +114,6 @@ export async function POST(request: NextRequest) {
 
     const input = {
       userId: session.user.id,
-      name,
       subdomain: subdomain.toLowerCase(),
       repoUrl,
       branch,

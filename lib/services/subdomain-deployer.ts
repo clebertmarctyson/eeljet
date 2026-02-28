@@ -157,7 +157,7 @@ export interface DeployResult {
 
 export interface CreateProjectInput {
   userId: string;
-  name: string;
+  name?: string;
   subdomain: string;
   repoUrl: string;
   branch?: string;
@@ -473,7 +473,7 @@ export async function createProject(
     const project = await prisma.project.create({
       data: {
         userId: input.userId,
-        name: input.name,
+        name: input.name || input.subdomain,
         subdomain: input.subdomain,
         repoUrl: input.repoUrl,
         branch: input.branch || "main",

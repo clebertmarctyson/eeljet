@@ -61,7 +61,6 @@ interface EnvVar {
 
 interface SavedFormState {
   selectedRepoId: string;
-  name: string;
   subdomain: string;
   branch: string;
   rootDirectory: string;
@@ -138,7 +137,6 @@ export default function NewProjectPage() {
   }>({});
 
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
-  const [name, setName] = useState("");
   const [subdomain, setSubdomain] = useState("");
   const [branch, setBranch] = useState("");
   const [rootDirectory, setRootDirectory] = useState("");
@@ -238,7 +236,6 @@ export default function NewProjectPage() {
   const saveFormState = useCallback(() => {
     const state: SavedFormState = {
       selectedRepoId,
-      name,
       subdomain,
       branch,
       rootDirectory,
@@ -251,7 +248,7 @@ export default function NewProjectPage() {
       // Ignore localStorage errors (quota, etc.)
       console.warn("Failed to save draft:", e);
     }
-  }, [selectedRepoId, name, subdomain, branch, rootDirectory, envVars]);
+  }, [selectedRepoId, subdomain, branch, rootDirectory, envVars]);
 
   const autoExpandFailedSteps = (steps: { id: string; status: string; output?: string; error?: string }[]) => {
     const failedIds = steps
@@ -294,7 +291,6 @@ export default function NewProjectPage() {
         // Check if draft is not expired
         if (Date.now() - state.savedAt < DRAFT_EXPIRY_MS) {
           setSelectedRepoId(state.selectedRepoId);
-          setName(state.name);
           setSubdomain(state.subdomain);
           setBranch(state.branch);
           setRootDirectory(state.rootDirectory);
@@ -312,7 +308,7 @@ export default function NewProjectPage() {
 
   // Auto-save form state when values change (debounced)
   useEffect(() => {
-    if (selectedRepoId || name || subdomain || envVars.length > 0) {
+    if (selectedRepoId || subdomain || envVars.length > 0) {
       const timeoutId = setTimeout(() => {
         saveFormState();
         setHasDraft(true);
@@ -322,7 +318,6 @@ export default function NewProjectPage() {
     }
   }, [
     selectedRepoId,
-    name,
     subdomain,
     branch,
     rootDirectory,
@@ -365,7 +360,6 @@ export default function NewProjectPage() {
       const isNewSelection =
         !hasDraft || (draftRepoId !== null && selectedRepoId !== draftRepoId);
       if (isNewSelection) {
-        setName(selectedRepo.name);
         const autoSubdomain = selectedRepo.name
           .toLowerCase()
           .replace(/[^a-z0-9-]/g, "-")
@@ -519,7 +513,6 @@ export default function NewProjectPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
           subdomain: subdomain.toLowerCase().trim(),
           repoUrl: selectedRepo.url,
           branch: branch.trim() || selectedRepo.defaultBranch,
@@ -568,10 +561,9 @@ export default function NewProjectPage() {
     }
   };
 
-  // Form is valid if: repo selected, name filled, subdomain valid + available, and no validation errors
+  // Form is valid if: repo selected, subdomain valid + available, and no validation errors
   const isValid =
     selectedRepo &&
-    name.trim() &&
     subdomain.trim() &&
     !validationErrors.subdomain &&
     subdomainAvailable !== false &&
@@ -612,7 +604,6 @@ export default function NewProjectPage() {
                 onClick={() => {
                   clearFormState();
                   setSelectedRepoId("");
-                  setName("");
                   setSubdomain("");
                   setBranch("");
                   setRootDirectory("");
@@ -734,35 +725,22 @@ export default function NewProjectPage() {
                   <CardTitle>Project Settings</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Project Name *</Label>
-                      <Input
-                        id="name"
-                        placeholder="My Portfolio"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                        maxLength={100}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="branch">Branch</Label>
-                      <Input
-                        id="branch"
-                        placeholder={selectedRepo.defaultBranch}
-                        value={branch}
-                        onChange={(e) => handleBranchChange(e.target.value)}
-                        className={
-                          validationErrors.branch ? "border-destructive" : ""
-                        }
-                      />
-                      {validationErrors.branch && (
-                        <p className="text-xs text-destructive">
-                          {validationErrors.branch}
-                        </p>
-                      )}
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="branch">Branch</Label>
+                    <Input
+                      id="branch"
+                      placeholder={selectedRepo.defaultBranch}
+                      value={branch}
+                      onChange={(e) => handleBranchChange(e.target.value)}
+                      className={
+                        validationErrors.branch ? "border-destructive" : ""
+                      }
+                    />
+                    {validationErrors.branch && (
+                      <p className="text-xs text-destructive">
+                        {validationErrors.branch}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
