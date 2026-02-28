@@ -37,6 +37,8 @@ import {
   Settings2,
   CheckCircle2,
   Loader2,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 interface GitHubRepo {
@@ -124,7 +126,8 @@ export default function NewProjectPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deployLogs, setDeployLogs] = useState<string | null>(null);
-  const [liveSteps, setLiveSteps] = useState<{ id: string; name: string; status: string; error?: string; durationMs?: number }[] | null>(null);
+  const [liveSteps, setLiveSteps] = useState<{ id: string; name: string; status: string; output?: string; error?: string; durationMs?: number }[] | null>(null);
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
   const [hasDraft, setHasDraft] = useState(false);
 
   // SECURITY: Add validation errors state
@@ -249,6 +252,28 @@ export default function NewProjectPage() {
       console.warn("Failed to save draft:", e);
     }
   }, [selectedRepoId, name, subdomain, branch, rootDirectory, envVars]);
+
+  const autoExpandFailedSteps = (steps: { id: string; status: string; output?: string; error?: string }[]) => {
+    const failedIds = steps
+      .filter((s) => s.status === "failed" && (s.output || s.error))
+      .map((s) => s.id);
+    if (failedIds.length > 0) {
+      setExpandedSteps((prev) => {
+        const next = new Set(prev);
+        failedIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  const toggleStepExpanded = (stepId: string) => {
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(stepId)) next.delete(stepId);
+      else next.add(stepId);
+      return next;
+    });
+  };
 
   // Clear saved form state
   const clearFormState = useCallback(() => {
@@ -477,6 +502,7 @@ export default function NewProjectPage() {
     setError(null);
     setDeployLogs(null);
     setLiveSteps(null);
+    setExpandedSteps(new Set());
     setSubmitting(true);
 
     // Convert envVars array to object (only non-empty keys)
@@ -521,12 +547,16 @@ export default function NewProjectPage() {
           const event = JSON.parse(line.slice(6));
           if (event.type === "progress") {
             setLiveSteps(event.steps);
+            autoExpandFailedSteps(event.steps);
           } else if (event.type === "complete") {
             clearFormState();
             router.push("/dashboard/projects");
             return;
           } else if (event.type === "error") {
-            if (event.steps) setLiveSteps(event.steps);
+            if (event.steps) {
+              setLiveSteps(event.steps);
+              autoExpandFailedSteps(event.steps);
+            }
             throw new Error(event.error || "Failed to create project");
           }
         }
@@ -1019,21 +1049,42 @@ export default function NewProjectPage() {
                 )}
               </Button>
 
-              {submitting && liveSteps && (
-                <div className="border rounded-lg p-4 space-y-2 bg-muted/30">
+              {liveSteps && (
+                <div className="border rounded-lg overflow-hidden bg-muted/30">
                   {liveSteps.map((step) => (
-                    <div key={step.id} className="flex items-center gap-3 text-sm">
-                      <span className="w-4 flex-shrink-0">
-                        {step.status === "running" && <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-500" />}
-                        {step.status === "success" && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
-                        {step.status === "failed" && <AlertCircle className="h-3.5 w-3.5 text-destructive" />}
-                        {step.status === "pending" && <span className="h-3.5 w-3.5 rounded-full border border-muted-foreground/30 inline-block" />}
-                        {step.status === "skipped" && <span className="h-3.5 w-3.5 text-muted-foreground">–</span>}
-                      </span>
-                      <span className={step.status === "pending" ? "text-muted-foreground" : step.status === "failed" ? "text-destructive" : ""}>
-                        {step.name}
-                      </span>
-                      {step.durationMs && <span className="ml-auto text-xs text-muted-foreground">{(step.durationMs / 1000).toFixed(1)}s</span>}
+                    <div key={step.id} className="border-b last:border-b-0">
+                      <button
+                        type="button"
+                        className="flex items-center gap-3 text-sm w-full px-4 py-2 text-left hover:bg-muted/50 transition-colors"
+                        onClick={() => toggleStepExpanded(step.id)}
+                      >
+                        <span className="w-4 shrink-0">
+                          {step.status === "running" && <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-500" />}
+                          {step.status === "success" && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                          {step.status === "failed" && <AlertCircle className="h-3.5 w-3.5 text-destructive" />}
+                          {step.status === "pending" && <span className="h-3.5 w-3.5 rounded-full border border-muted-foreground/30 inline-block" />}
+                          {step.status === "skipped" && <span className="h-3.5 w-3.5 text-muted-foreground">–</span>}
+                        </span>
+                        <span className={`flex-1 ${step.status === "pending" ? "text-muted-foreground" : step.status === "failed" ? "text-destructive" : ""}`}>
+                          {step.name}
+                        </span>
+                        {step.durationMs != null && <span className="text-xs text-muted-foreground">{(step.durationMs / 1000).toFixed(1)}s</span>}
+                        {(step.output || step.error) && (
+                          expandedSteps.has(step.id)
+                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        )}
+                      </button>
+                      {expandedSteps.has(step.id) && (step.output || step.error) && (
+                        <div className="px-4 pb-3 border-t space-y-2">
+                          {step.output && (
+                            <pre className="mt-2 text-xs font-mono bg-muted p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap">{step.output}</pre>
+                          )}
+                          {step.error && (
+                            <pre className="mt-2 text-xs font-mono bg-destructive/10 text-destructive p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap">{step.error}</pre>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
