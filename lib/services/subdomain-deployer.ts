@@ -358,11 +358,16 @@ export async function createProject(
     // STEP 6: Install dependencies
     logger.startStep(installStep);
     const installCmd = input.installCommand || pm.getInstallCommand();
-    await sshExec(
+    const installResult = await sshExec(
       vps.ssh,
       `bash -c '${SOURCE_NVM} && cd "${workDir}" && ${installCmd} 2>&1'`,
       { timeout: 300000 },
     );
+    if (installResult.code !== 0) {
+      const out = installResult.stdout.trim() || installResult.stderr.trim() || undefined;
+      logger.failStep(installStep, `${pm.name} install failed`, out);
+      throw new Error(`${pm.name} install failed`);
+    }
     logger.completeStep(installStep, "Dependencies installed");
 
     // STEP 7: ORM setup (if detected)
@@ -379,11 +384,16 @@ export async function createProject(
     // STEP 8: Build
     logger.startStep(buildStep);
     const buildCmd = input.buildCommand || appType.getBuildCommand(pm.name);
-    await sshExec(
+    const buildResult = await sshExec(
       vps.ssh,
       `bash -c '${SOURCE_NVM} && cd "${workDir}" && ${buildCmd} 2>&1'`,
       { timeout: 600000 },
     );
+    if (buildResult.code !== 0) {
+      const out = buildResult.stdout.trim() || buildResult.stderr.trim() || undefined;
+      logger.failStep(buildStep, "Build failed", out);
+      throw new Error("Build failed");
+    }
     logger.completeStep(buildStep, "Build completed");
 
     // STEP 9: PM2 ecosystem config (app-type specific, or custom start command)
@@ -426,8 +436,18 @@ export async function createProject(
       `bash -c '${SOURCE_NVM} && cd "${projectPath}" && pm2 start ecosystem.config.js 2>&1'`,
     );
     await sleep(3000); // Wait for startup
-    await verifyPM2Running(vps, pm2Id);
-    await verifyPortBound(vps, input.port);
+    try {
+      await verifyPM2Running(vps, pm2Id);
+      await verifyPortBound(vps, input.port);
+    } catch (pm2Err) {
+      const logsResult = await sshExec(
+        vps.ssh,
+        `bash -c '${SOURCE_NVM} && pm2 logs ${pm2Id} --lines 50 --nostream 2>&1 || true'`,
+      );
+      const errMsg = pm2Err instanceof Error ? pm2Err.message : "Application failed to start";
+      logger.failStep(pm2Step, errMsg, logsResult.stdout.trim() || undefined);
+      throw pm2Err;
+    }
     await sshExec(vps.ssh, `bash -c '${SOURCE_NVM} && pm2 save'`);
     logger.completeStep(pm2Step, "Application started and saved");
 
@@ -794,9 +814,9 @@ export async function deployProject(
             { timeout: 300000 },
           );
           if (installResult.code !== 0) {
-            throw new Error(
-              `${pm.name} install failed: ${installResult.stderr || installResult.stdout}`,
-            );
+            const out = installResult.stdout.trim() || installResult.stderr.trim() || undefined;
+            logger.failStep(stepId, `${pm.name} install failed`, out);
+            throw new Error(`${pm.name} install failed`);
           }
           logger.completeStep(stepId, "Dependencies installed");
           break;
@@ -840,9 +860,9 @@ export async function deployProject(
             { timeout: 600000 },
           );
           if (buildResult.code !== 0) {
-            throw new Error(
-              `Build failed: ${buildResult.stderr || buildResult.stdout}`,
-            );
+            const out = buildResult.stdout.trim() || buildResult.stderr.trim() || undefined;
+            logger.failStep(stepId, "Build failed", out);
+            throw new Error("Build failed");
           }
           logger.completeStep(stepId, "Build completed");
           break;
@@ -890,7 +910,22 @@ export async function deployProject(
             `bash -c '${sourceNvm} && pm2 restart ${project.pm2Id} && pm2 save'`,
           );
           if (restartResult.code !== 0) {
+            const out = restartResult.stderr.trim() || restartResult.stdout.trim() || undefined;
+            logger.failStep(stepId, "PM2 restart failed", out);
             throw new Error(`PM2 restart failed: ${restartResult.stderr}`);
+          }
+          await sleep(3000);
+          try {
+            await verifyPM2Running(vps, project.pm2Id!);
+            await verifyPortBound(vps, project.port);
+          } catch (pm2Err) {
+            const logsResult = await sshExec(
+              vps.ssh,
+              `bash -c '${sourceNvm} && pm2 logs ${project.pm2Id} --lines 50 --nostream 2>&1 || true'`,
+            );
+            const errMsg = pm2Err instanceof Error ? pm2Err.message : "Application failed to start";
+            logger.failStep(stepId, errMsg, logsResult.stdout.trim() || undefined);
+            throw pm2Err;
           }
           logger.completeStep(stepId, "Application restarted");
           break;
