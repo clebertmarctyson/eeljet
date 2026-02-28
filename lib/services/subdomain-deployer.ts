@@ -11,7 +11,7 @@ import {
 } from "./nginx-manager";
 import { sshExec, type SSHExecResult } from "./ssh-client";
 import { decrypt, encrypt } from "@/lib/encryption";
-import { DeploymentLogger } from "./deployment-logger";
+import { DeploymentLogger, type LoggerProgressCallback } from "./deployment-logger";
 import type { Project, Deployment } from "@/lib/generated/prisma/client";
 import { detectAppType, type AppTypeDetector } from "./builds";
 import { detectPackageManager } from "./packages";
@@ -177,10 +177,11 @@ export interface CreateProjectInput {
  */
 export async function createProject(
   input: CreateProjectInput,
+  onProgress?: LoggerProgressCallback,
 ): Promise<DeployResult> {
   const vps = getVPSConfig();
   const domain = getAppDomain();
-  const logger = new DeploymentLogger();
+  const logger = new DeploymentLogger(onProgress);
 
   // Validation
   let gitProvider;
@@ -548,7 +549,7 @@ export async function createProject(
  */
 export async function deployProject(
   projectId: string,
-  options?: { resumeFromStep?: string },
+  options?: { resumeFromStep?: string; onProgress?: LoggerProgressCallback },
 ): Promise<DeployResult> {
   const vps = getVPSConfig();
   const domain = getAppDomain();
@@ -577,7 +578,7 @@ export async function deployProject(
   const projectPath = `${vps.projectsRoot}/${project.subdomain}`;
   const sourceNvm = SOURCE_NVM;
 
-  const logger = new DeploymentLogger();
+  const logger = new DeploymentLogger(options?.onProgress);
 
   // Define all steps
   const STEPS = {
@@ -1038,7 +1039,7 @@ export async function syncEnvToVPS(
  * Delete a project and clean up all resources
  * Every step is independently wrapped so one failure never blocks others.
  */
-export async function deleteProject(projectId: string): Promise<DeployResult> {
+export async function deleteProject(projectId: string, onProgress?: (log: string) => void): Promise<DeployResult> {
   const vps = getVPSConfig();
   const domain = getAppDomain();
 
@@ -1058,6 +1059,7 @@ export async function deleteProject(projectId: string): Promise<DeployResult> {
   const appendLog = (msg: string) => {
     logs += `[${new Date().toISOString()}] ${msg}\n`;
     console.log(`[Delete] ${msg}`);
+    onProgress?.(logs);
   };
 
   // Helper: run SSH command, check exit code, throw on failure

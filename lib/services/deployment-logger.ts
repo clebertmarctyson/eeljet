@@ -11,10 +11,21 @@ export interface DeploymentStep {
   durationMs?: number;
 }
 
+export type LoggerProgressCallback = (
+  steps: DeploymentStep[],
+  textLog: string,
+) => void;
+
 export class DeploymentLogger {
   private steps: DeploymentStep[] = [];
   private textLog = "";
   private stepIndex = 0;
+
+  constructor(private onUpdate?: LoggerProgressCallback) {}
+
+  private notify(): void {
+    this.onUpdate?.([...this.steps], this.textLog);
+  }
 
   addStep(name: string, command?: string): string {
     const id = `step-${this.stepIndex++}`;
@@ -36,6 +47,7 @@ export class DeploymentLogger {
       if (step.command) {
         this.appendText(`  Command: ${step.command}`);
       }
+      this.notify();
     }
   }
 
@@ -49,6 +61,7 @@ export class DeploymentLogger {
         new Date(step.startedAt!).getTime();
       step.output = output ? output.substring(0, 5000) : undefined;
       this.appendText(`DONE: ${step.name} (${step.durationMs}ms)`);
+      this.notify();
     }
   }
 
@@ -63,6 +76,7 @@ export class DeploymentLogger {
       step.error = error;
       step.output = output ? output.substring(0, 5000) : undefined;
       this.appendText(`FAILED: ${step.name} - ${error}`);
+      this.notify();
     }
   }
 
@@ -71,6 +85,7 @@ export class DeploymentLogger {
     if (step) {
       step.status = "skipped";
       this.appendText(`SKIPPED: ${step.name}${reason ? ` (${reason})` : ""}`);
+      this.notify();
     }
   }
 

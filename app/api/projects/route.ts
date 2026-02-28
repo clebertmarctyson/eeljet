@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
     // Get next available port if not provided
     const assignedPort = port || (await getNextAvailablePort());
 
-    const result = await createProject({
+    const input = {
       userId: session.user.id,
       name,
       subdomain: subdomain.toLowerCase(),
@@ -133,16 +133,42 @@ export async function POST(request: NextRequest) {
       installCommand: installCommand || undefined,
       buildCommand: buildCommand || undefined,
       startCommand: startCommand || undefined,
+    };
+
+    const encoder = new TextEncoder();
+    const stream = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = stream.writable.getWriter();
+
+    const send = (event: Record<string, unknown>) => {
+      writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    };
+
+    // Run deployment in background, streaming progress
+    (async () => {
+      try {
+        const result = await createProject(input, (steps, textLog) => {
+          send({ type: "progress", steps, textLog });
+        });
+        if (!result.success) {
+          send({ type: "error", error: toUserError(result.error || "Deployment failed") });
+        } else {
+          send({ type: "complete", ...result });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        send({ type: "error", error: toUserError(message) });
+      } finally {
+        writer.close();
+      }
+    })();
+
+    return new Response(stream.readable, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
     });
-
-    if (!result.success) {
-      return NextResponse.json(
-        { error: toUserError(result.error || "Deployment failed"), logs: result.logs },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: toUserError(message) }, { status: 400 });

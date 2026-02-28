@@ -86,7 +86,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
 /**
  * DELETE /api/projects/[id]
- * Removes a project and all its resources
+ * Removes a project and all its resources — streams progress via SSE
  */
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const session = await auth();
@@ -106,18 +106,39 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  try {
-    const result = await deleteProject(id);
+  const encoder = new TextEncoder();
+  const stream = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = stream.writable.getWriter();
 
-    if (!result.success) {
-      return NextResponse.json({ error: toUserError(result.error || "Deletion failed") }, { status: 400 });
+  const send = (event: Record<string, unknown>) => {
+    writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+  };
+
+  (async () => {
+    try {
+      const result = await deleteProject(id, (log) => {
+        send({ type: "log", log });
+      });
+      if (!result.success) {
+        send({ type: "error", error: toUserError(result.error || "Deletion failed") });
+      } else {
+        send({ type: "complete" });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      send({ type: "error", error: toUserError(message) });
+    } finally {
+      writer.close();
     }
+  })();
 
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: toUserError(message) }, { status: 400 });
-  }
+  return new Response(stream.readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 /**
@@ -147,35 +168,56 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const body = await request.json();
     const { action } = body;
 
-    let result;
-
-    switch (action) {
-      case "deploy":
-        result = await deployProject(id, {
-          resumeFromStep: body.resumeFromStep,
-        });
-        break;
-      case "restart":
-        result = await restartProject(id);
-        break;
-      case "stop":
-        result = await stopProject(id);
-        break;
-      default:
-        return NextResponse.json(
-          { error: "Invalid action. Use 'deploy', 'restart', or 'stop'" },
-          { status: 400 }
-        );
-    }
-
-    if (!result.success) {
+    if (!["deploy", "restart", "stop"].includes(action)) {
       return NextResponse.json(
-        { error: toUserError(result.error || "Action failed"), logs: result.logs },
+        { error: "Invalid action. Use 'deploy', 'restart', or 'stop'" },
         { status: 400 },
       );
     }
 
-    return NextResponse.json(result);
+    const encoder = new TextEncoder();
+    const stream = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = stream.writable.getWriter();
+
+    const send = (event: Record<string, unknown>) => {
+      writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    };
+
+    (async () => {
+      try {
+        let result;
+        if (action === "deploy") {
+          result = await deployProject(id, {
+            resumeFromStep: body.resumeFromStep,
+            onProgress: (steps, textLog) => {
+              send({ type: "progress", steps, textLog });
+            },
+          });
+        } else if (action === "restart") {
+          result = await restartProject(id);
+        } else {
+          result = await stopProject(id);
+        }
+        if (!result.success) {
+          send({ type: "error", error: toUserError(result.error || "Action failed"), logs: result.logs });
+        } else {
+          send({ type: "complete", ...result });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        send({ type: "error", error: toUserError(message) });
+      } finally {
+        writer.close();
+      }
+    })();
+
+    return new Response(stream.readable, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: toUserError(message) }, { status: 400 });

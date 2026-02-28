@@ -124,6 +124,7 @@ export default function NewProjectPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deployLogs, setDeployLogs] = useState<string | null>(null);
+  const [liveSteps, setLiveSteps] = useState<{ id: string; name: string; status: string; error?: string; durationMs?: number }[] | null>(null);
   const [hasDraft, setHasDraft] = useState(false);
 
   // SECURITY: Add validation errors state
@@ -475,6 +476,7 @@ export default function NewProjectPage() {
 
     setError(null);
     setDeployLogs(null);
+    setLiveSteps(null);
     setSubmitting(true);
 
     // Convert envVars array to object (only non-empty keys)
@@ -504,16 +506,31 @@ export default function NewProjectPage() {
         }),
       });
 
-      const data = await res.json();
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      if (!res.ok) {
-        setDeployLogs(data.logs || null);
-        throw new Error(data.error || "Failed to create project");
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "progress") {
+            setLiveSteps(event.steps);
+          } else if (event.type === "complete") {
+            clearFormState();
+            router.push("/dashboard/projects");
+            return;
+          } else if (event.type === "error") {
+            if (event.steps) setLiveSteps(event.steps);
+            throw new Error(event.error || "Failed to create project");
+          }
+        }
       }
-
-      // Clear draft on success
-      clearFormState();
-      router.push("/dashboard/projects");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -1002,10 +1019,29 @@ export default function NewProjectPage() {
                 )}
               </Button>
 
-              {submitting && (
+              {submitting && liveSteps && (
+                <div className="border rounded-lg p-4 space-y-2 bg-muted/30">
+                  {liveSteps.map((step) => (
+                    <div key={step.id} className="flex items-center gap-3 text-sm">
+                      <span className="w-4 flex-shrink-0">
+                        {step.status === "running" && <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-500" />}
+                        {step.status === "success" && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                        {step.status === "failed" && <AlertCircle className="h-3.5 w-3.5 text-destructive" />}
+                        {step.status === "pending" && <span className="h-3.5 w-3.5 rounded-full border border-muted-foreground/30 inline-block" />}
+                        {step.status === "skipped" && <span className="h-3.5 w-3.5 text-muted-foreground">–</span>}
+                      </span>
+                      <span className={step.status === "pending" ? "text-muted-foreground" : step.status === "failed" ? "text-destructive" : ""}>
+                        {step.name}
+                      </span>
+                      {step.durationMs && <span className="ml-auto text-xs text-muted-foreground">{(step.durationMs / 1000).toFixed(1)}s</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {submitting && !liveSteps && (
                 <p className="text-sm text-center text-muted-foreground">
-                  Cloning repository, installing dependencies, building, and
-                  configuring...
+                  Connecting to server...
                 </p>
               )}
 

@@ -246,59 +246,71 @@ export default function ProjectDetailPage({
     };
   };
 
+  const consumeSSE = async (
+    res: Response,
+    onProgress?: (steps: DeploymentStep[], textLog: string) => void,
+    onLog?: (log: string) => void,
+  ): Promise<{ error?: string; result?: Record<string, unknown> }> => {
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const event = JSON.parse(line.slice(6));
+        if (event.type === "progress" && onProgress) onProgress(event.steps, event.textLog);
+        else if (event.type === "log" && onLog) onLog(event.log);
+        else if (event.type === "complete") return { result: event };
+        else if (event.type === "error") return { error: event.error };
+      }
+    }
+    return {};
+  };
+
   const handleDeploy = async (resumeFromStep?: string) => {
     setShowResumeDialog(false);
     setActionLoading("deploy");
     setActionResult(null);
+    setDeploymentSteps(null);
+    setDeploymentTextLog(null);
 
     try {
       const res = await fetch(`/api/projects/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "deploy",
-          ...(resumeFromStep && { resumeFromStep }),
-        }),
+        body: JSON.stringify({ action: "deploy", ...(resumeFromStep && { resumeFromStep }) }),
       });
 
-      const data = await res.json();
+      const { error } = await consumeSSE(
+        res,
+        (steps, textLog) => {
+          setDeploymentSteps(steps);
+          setDeploymentTextLog(textLog);
+          setSelectedDeployment("live");
+        },
+      );
 
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to deploy");
-      }
+      if (error) throw new Error(error);
 
-      setActionResult({
-        type: "success",
-        message: "Deployment completed successfully",
-      });
-
-      const refreshRes = await fetch(`/api/projects/${id}`);
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        setProject(refreshData);
-        // Auto-open logs for the latest deployment
-        if (refreshData.deployments?.[0]?.id) {
-          fetchDeploymentLogs(refreshData.deployments[0].id);
-        }
-      }
+      setActionResult({ type: "success", message: "Deployment completed successfully" });
     } catch (err) {
-      setActionResult({
-        type: "error",
-        message: err instanceof Error ? err.message : "Unknown error",
-      });
-
-      // Refresh to get latest deployment with logs
-      const refreshRes = await fetch(`/api/projects/${id}`);
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        setProject(refreshData);
-        // Auto-open logs for the latest deployment
-        if (refreshData.deployments?.[0]?.id) {
-          fetchDeploymentLogs(refreshData.deployments[0].id);
-        }
-      }
+      setActionResult({ type: "error", message: err instanceof Error ? err.message : "Unknown error" });
     } finally {
       setActionLoading(null);
+      // Refresh project + fetch final logs from DB
+      const refreshRes = await fetch(`/api/projects/${id}`);
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        setProject(refreshData);
+        if (refreshData.deployments?.[0]?.id) {
+          fetchDeploymentLogs(refreshData.deployments[0].id);
+        }
+      }
     }
   };
 
@@ -345,7 +357,7 @@ export default function ProjectDetailPage({
     }
   };
 
-  const handleAction = async (action: "deploy" | "restart" | "stop") => {
+  const handleAction = async (action: "restart" | "stop") => {
     setActionLoading(action);
     setActionResult(null);
 
@@ -356,32 +368,18 @@ export default function ProjectDetailPage({
         body: JSON.stringify({ action }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || `Failed to ${action}`);
-      }
+      const { error } = await consumeSSE(res);
+      if (error) throw new Error(error);
 
       setActionResult({
         type: "success",
-        message: action === "deploy"
-          ? "Deployment started successfully"
-          : action === "restart"
-          ? "Project restarted"
-          : "Project stopped",
+        message: action === "restart" ? "Project restarted" : "Project stopped",
       });
 
-      // Refresh project data
       const refreshRes = await fetch(`/api/projects/${id}`);
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        setProject(refreshData);
-      }
+      if (refreshRes.ok) setProject(await refreshRes.json());
     } catch (err) {
-      setActionResult({
-        type: "error",
-        message: err instanceof Error ? err.message : "Unknown error",
-      });
+      setActionResult({ type: "error", message: err instanceof Error ? err.message : "Unknown error" });
     } finally {
       setActionLoading(null);
     }
@@ -389,20 +387,23 @@ export default function ProjectDetailPage({
 
   const handleDelete = async () => {
     setActionLoading("delete");
+    setDeploymentTextLog(null);
+    setSelectedDeployment("live-delete");
+
     try {
       const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to delete project");
-      }
+      const { error } = await consumeSSE(
+        res,
+        undefined,
+        (log) => setDeploymentTextLog(log),
+      );
+
+      if (error) throw new Error(error);
 
       router.push("/dashboard/projects");
     } catch (err) {
-      setActionResult({
-        type: "error",
-        message: err instanceof Error ? err.message : "Unknown error",
-      });
+      setActionResult({ type: "error", message: err instanceof Error ? err.message : "Unknown error" });
       setActionLoading(null);
     }
   };
