@@ -62,8 +62,18 @@ async function readMapFile(vps: VPSConfig): Promise<string> {
 }
 
 /**
- * Write content to the port mapping file via temp file + sudo mv.
- * Avoids sudo for grep/sed/tee — only uses sudo mv (in the sudoers NOPASSWD list).
+ * Write content to the port mapping file via temp file + mv.
+ * Tries direct mv first (works if deploy user owns the file).
+ * Falls back to sudo mv (requires NOPASSWD in sudoers for mv).
+ *
+ * VPS one-time setup to avoid sudo for mv:
+ *   sudo chown $VPS_USER:$VPS_USER /etc/nginx/subdomain-ports.map
+ *   sudo chmod 644 /etc/nginx/subdomain-ports.map
+ *
+ * Or, if you prefer NOPASSWD instead:
+ *   echo "$VPS_USER ALL=(ALL) NOPASSWD: /bin/mv /tmp/eeljet-portmap.tmp /etc/nginx/subdomain-ports.map" \
+ *     | sudo tee /etc/sudoers.d/eeljet-mv > /dev/null
+ *   sudo chmod 440 /etc/sudoers.d/eeljet-mv
  */
 async function writeMapFile(vps: VPSConfig, content: string): Promise<void> {
   const tmpFile = "/tmp/eeljet-portmap.tmp";
@@ -74,9 +84,24 @@ async function writeMapFile(vps: VPSConfig, content: string): Promise<void> {
   if (writeResult.code !== 0) {
     throw new Error(`Failed to write temp map file: ${writeResult.stderr}`);
   }
-  const mvResult = await sshExec(vps.ssh, `sudo mv "${tmpFile}" "${vps.portMappingFile}"`);
+
+  // Try direct mv first — works if deploy user owns the port mapping file.
+  const directMv = await sshExec(
+    vps.ssh,
+    `mv "${tmpFile}" "${vps.portMappingFile}" 2>/dev/null`,
+  );
+  if (directMv.code === 0) return;
+
+  // Fall back to sudo mv (requires NOPASSWD in /etc/sudoers.d/eeljet-mv).
+  const mvResult = await sshExec(
+    vps.ssh,
+    `sudo mv "${tmpFile}" "${vps.portMappingFile}"`,
+  );
   if (mvResult.code !== 0) {
-    throw new Error(`Failed to move map file: ${mvResult.stderr}`);
+    throw new Error(
+      `Failed to move map file: ${mvResult.stderr}\n` +
+        `Fix on VPS: sudo chown ${vps.deployUser}:${vps.deployUser} ${vps.portMappingFile}`,
+    );
   }
 }
 
